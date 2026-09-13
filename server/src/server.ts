@@ -133,11 +133,22 @@ app.use('/api/uploads', express.static(uploadsDir));
 // Network discovery endpoint: returns local LAN IP for QR codes
 const localIp = getLocalIpAddress();
 
-app.get('/api/network-info', (_req, res) => {
+app.get('/api/network-info', (req, res) => {
+  const renderUrl = process.env.RENDER_EXTERNAL_URL;
+  const hostHeader = req.headers.host;
+  let publicUrl = `http://${localIp}:${PORT}`;
+
+  if (renderUrl) {
+    publicUrl = renderUrl;
+  } else if (hostHeader && !hostHeader.includes('localhost') && !hostHeader.includes('127.0.0.1') && !hostHeader.startsWith('10.') && !hostHeader.startsWith('192.168.')) {
+    const proto = req.headers['x-forwarded-proto'] || 'https';
+    publicUrl = `${proto}://${hostHeader}`;
+  }
+
   res.json({
     localIp,
     port: PORT,
-    lanUrl: `http://${localIp}:${PORT}`
+    lanUrl: publicUrl
   });
 });
 
