@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0ea5e9" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#10b981" />
+    </linearGradient>
+  </defs>
+  <rect width="100" height="100" rx="24" fill="#090d16" />
+  <rect x="4" y="4" width="92" height="92" rx="20" stroke="url(#g)" stroke-width="2" />
+  
+  <!-- Soundwave bars -->
+  <rect x="22" y="42" width="8" height="16" rx="4" fill="url(#g)" />
+  <rect x="36" y="30" width="8" height="40" rx="4" fill="url(#g)" />
+  <rect x="50" y="20" width="8" height="60" rx="4" fill="#10b981" />
+  <rect x="64" y="35" width="8" height="30" rx="4" fill="url(#g)" />
+  <rect x="78" y="45" width="8" height="10" rx="4" fill="url(#g)" />
+</svg>
