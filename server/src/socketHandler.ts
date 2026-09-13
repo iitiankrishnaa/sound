@@ -32,22 +32,33 @@ export function setupSocketHandlers(io: Server, roomManager: RoomManager) {
     });
 
     // 3. Room Joining
-    socket.on('ROOM_JOIN', (data: {
-      roomId: string;
-      deviceName: string;
+    socket.on('ROOM_JOIN', (data?: {
+      roomId?: string;
+      deviceName?: string;
       pin?: string;
       hostToken?: string;
     }) => {
+      if (!data || !data.roomId) {
+        socket.emit('ROOM_ERROR', { message: 'Please enter a 5-character room code.' });
+        return;
+      }
+
+      const cleanRoomId = String(data.roomId).replace(/[^a-zA-Z0-9]/g, '').trim().toUpperCase();
+      if (!cleanRoomId) {
+        socket.emit('ROOM_ERROR', { message: 'Invalid room code.' });
+        return;
+      }
+
       const result = roomManager.joinRoom(
-        data.roomId,
+        cleanRoomId,
         socket.id,
-        data.deviceName,
+        data.deviceName || 'Speaker Device',
         data.pin,
         data.hostToken
       );
 
       if (!result.success || !result.room) {
-        socket.emit('ROOM_ERROR', { message: result.error || 'Failed to join room' });
+        socket.emit('ROOM_ERROR', { message: result.error || 'Failed to join room.' });
         return;
       }
 

@@ -180,14 +180,16 @@ const localIp = getLocalIpAddress();
 
 app.get('/api/network-info', (req, res) => {
   const renderUrl = process.env.RENDER_EXTERNAL_URL;
-  const hostHeader = req.headers.host;
+  const forwardedHost = (req.headers['x-forwarded-host'] as string) || req.headers.host;
+  const proto = (req.headers['x-forwarded-proto'] as string) || (req.secure ? 'https' : 'http');
   let publicUrl = `http://${localIp}:${PORT}`;
 
   if (renderUrl) {
     publicUrl = renderUrl;
-  } else if (hostHeader && !hostHeader.includes('localhost') && !hostHeader.includes('127.0.0.1') && !hostHeader.startsWith('10.') && !hostHeader.startsWith('192.168.')) {
-    const proto = req.headers['x-forwarded-proto'] || 'https';
-    publicUrl = `${proto}://${hostHeader}`;
+  } else if (forwardedHost && !forwardedHost.includes('localhost') && !forwardedHost.includes('127.0.0.1') && !forwardedHost.startsWith('10.') && !forwardedHost.startsWith('192.168.')) {
+    publicUrl = `${proto}://${forwardedHost}`;
+  } else if (isCloudProduction && forwardedHost) {
+    publicUrl = `https://${forwardedHost}`;
   }
 
   res.json({

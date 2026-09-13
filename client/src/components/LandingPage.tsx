@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { Radio, Laptop, Smartphone, Tablet, Volume2, Sparkles, Sliders, ShieldCheck, ArrowRight, Music, Zap } from 'lucide-react';
+import { Radio, Laptop, Smartphone, Tablet, Volume2, Sparkles, Sliders, ShieldCheck, ArrowRight, Music, Zap, Loader2 } from 'lucide-react';
 
 interface Props {
   onCreateRoom: (options: { hostName: string; pin?: string }) => void;
   onJoinRoom: (roomId: string, deviceName: string, pin?: string) => void;
   initialJoinCode?: string;
+  isJoining?: boolean;
 }
 
-export const LandingPage: React.FC<Props> = ({ onCreateRoom, onJoinRoom, initialJoinCode = '' }) => {
+export const LandingPage: React.FC<Props> = ({ onCreateRoom, onJoinRoom, initialJoinCode = '', isJoining = false }) => {
   const [modalMode, setModalMode] = useState<'create' | 'join' | null>(initialJoinCode ? 'join' : null);
   const [hostName, setHostName] = useState('My PC Controller');
   const [pin, setPin] = useState('');
-  const [roomId, setRoomId] = useState(initialJoinCode.toUpperCase());
+  const [roomId, setRoomId] = useState(initialJoinCode.replace(/[^a-zA-Z0-9]/g, '').toUpperCase());
   const [deviceName, setDeviceName] = useState(() => {
     // Generate default device name based on user agent
     const ua = navigator.userAgent;
@@ -24,20 +25,21 @@ export const LandingPage: React.FC<Props> = ({ onCreateRoom, onJoinRoom, initial
 
   useEffect(() => {
     if (initialJoinCode) {
-      setRoomId(initialJoinCode.toUpperCase());
+      setRoomId(initialJoinCode.replace(/[^a-zA-Z0-9]/g, '').toUpperCase());
       setModalMode('join');
     }
   }, [initialJoinCode]);
 
   const handleCreateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onCreateRoom({ hostName, pin: pin || undefined });
+    onCreateRoom({ hostName, pin: pin ? pin.trim() : undefined });
   };
 
   const handleJoinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!roomId.trim()) return;
-    onJoinRoom(roomId.trim().toUpperCase(), deviceName, pin || undefined);
+    const clean = roomId.replace(/[^a-zA-Z0-9]/g, '').trim().toUpperCase();
+    if (!clean) return;
+    onJoinRoom(clean, deviceName, pin ? pin.trim() : undefined);
   };
 
   return (
@@ -123,15 +125,26 @@ export const LandingPage: React.FC<Props> = ({ onCreateRoom, onJoinRoom, initial
               type="text"
               maxLength={5}
               value={roomId}
-              onChange={(e) => setRoomId(e.target.value.toUpperCase())}
+              onChange={(e) => setRoomId(e.target.value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase())}
               placeholder="e.g. A7K92"
-              className="flex-1 px-4 py-3 bg-slate-950 border border-slate-700 rounded-xl font-mono text-base font-bold tracking-widest text-sky-400 uppercase text-center placeholder-slate-600 focus:outline-none focus:border-sky-400"
+              disabled={isJoining}
+              className="flex-1 px-4 py-3 bg-slate-950 border border-slate-700 rounded-xl font-mono text-base font-bold tracking-widest text-sky-400 uppercase text-center placeholder-slate-600 focus:outline-none focus:border-sky-400 disabled:opacity-60"
             />
             <button
               type="submit"
-              className="px-6 py-3 bg-gradient-to-r from-emerald-500 to-sky-600 hover:from-emerald-400 hover:to-sky-500 text-white font-bold text-sm rounded-xl shadow-lg shadow-emerald-500/20 active:scale-95 transition flex items-center gap-1.5 shrink-0"
+              disabled={isJoining || !roomId.trim()}
+              className="px-6 py-3 bg-gradient-to-r from-emerald-500 to-sky-600 hover:from-emerald-400 hover:to-sky-500 disabled:opacity-50 text-white font-bold text-sm rounded-xl shadow-lg shadow-emerald-500/20 active:scale-95 transition flex items-center gap-1.5 shrink-0"
             >
-              <span>Connect</span> <ArrowRight size={15} />
+              {isJoining ? (
+                <>
+                  <Loader2 size={15} className="animate-spin" />
+                  <span>Joining...</span>
+                </>
+              ) : (
+                <>
+                  <span>Connect</span> <ArrowRight size={15} />
+                </>
+              )}
             </button>
           </form>
         </div>
@@ -328,16 +341,25 @@ export const LandingPage: React.FC<Props> = ({ onCreateRoom, onJoinRoom, initial
               <div className="pt-2 flex gap-3">
                 <button
                   type="button"
+                  disabled={isJoining}
                   onClick={() => setModalMode(null)}
-                  className="flex-1 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm font-semibold transition"
+                  className="flex-1 py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-sm font-semibold transition"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-sky-600 hover:from-emerald-400 hover:to-sky-500 text-white text-sm font-bold shadow-lg shadow-emerald-500/25 transition active:scale-95"
+                  disabled={isJoining || !roomId.trim()}
+                  className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-sky-600 hover:from-emerald-400 hover:to-sky-500 disabled:opacity-50 text-white text-sm font-bold shadow-lg shadow-emerald-500/25 transition active:scale-95 flex items-center justify-center gap-2"
                 >
-                  Join Speaker
+                  {isJoining ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      <span>Joining...</span>
+                    </>
+                  ) : (
+                    <span>Join Speaker</span>
+                  )}
                 </button>
               </div>
             </form>

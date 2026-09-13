@@ -9,8 +9,8 @@ export const socket: Socket = io({
   reconnectionAttempts: Infinity,
   reconnectionDelay: 1000,
   reconnectionDelayMax: 5000,
-  timeout: 10000,
-  transports: ['websocket', 'polling']
+  timeout: 15000,
+  transports: ['polling', 'websocket']
 });
 
 export function getSocketId(): string {

@@ -137,19 +137,28 @@ export class RoomManager {
     pin?: string,
     hostToken?: string
   ): { success: boolean; room?: Room; isHost?: boolean; error?: string } {
-    const roomId = roomIdInput.trim().toUpperCase();
+    if (!roomIdInput || typeof roomIdInput !== 'string') {
+      return { success: false, error: 'Please enter a valid 5-character room code.' };
+    }
+
+    const roomId = roomIdInput.replace(/[^a-zA-Z0-9]/g, '').trim().toUpperCase();
     const room = this.rooms.get(roomId);
 
     if (!room) {
-      return { success: false, error: 'Room not found. Please verify the 5-character code.' };
+      return { success: false, error: `Room "${roomId}" was not found. Please verify the code or ask the host.` };
     }
 
     if (room.isLocked && (!hostToken || hostToken !== room.hostToken)) {
       return { success: false, error: 'This room is currently locked by the host.' };
     }
 
-    if (room.pin && room.pin !== pin?.trim() && (!hostToken || hostToken !== room.hostToken)) {
-      return { success: false, error: 'Incorrect PIN for this room.' };
+    if (room.pin && (!hostToken || hostToken !== room.hostToken)) {
+      if (!pin || !pin.trim()) {
+        return { success: false, error: 'This room is protected by a PIN. Please enter the PIN.' };
+      }
+      if (room.pin !== pin.trim()) {
+        return { success: false, error: 'Incorrect PIN for this room.' };
+      }
     }
 
     const isHostReconnecting = hostToken && hostToken === room.hostToken;
