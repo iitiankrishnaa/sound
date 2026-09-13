@@ -8,6 +8,8 @@ export class AudioEngine {
   private analyserNode: AnalyserNode | null = null;
   private currentSource: AudioBufferSourceNode | null = null;
   private bufferCache: Map<string, AudioBuffer> = new Map();
+  private isPreloadingTrackId: string | null = null;
+  private consecutiveHighDriftCount = 0;
 
   private isUnlocked = false;
   private isPlaying = false;
@@ -26,6 +28,33 @@ export class AudioEngine {
 
   constructor() {
     // AudioContext will be initialized on first user interaction
+  }
+
+  public hasBuffer(trackId: string): boolean {
+    return this.bufferCache.has(trackId);
+  }
+
+  public setCachedBuffer(trackId: string, buffer: AudioBuffer): void {
+    this.bufferCache.set(trackId, buffer);
+  }
+
+  public async preloadTrack(track: TrackInfo): Promise<AudioBuffer | null> {
+    if (this.bufferCache.has(track.id)) {
+      return this.bufferCache.get(track.id)!;
+    }
+    if (this.isPreloadingTrackId === track.id) {
+      return null;
+    }
+    this.isPreloadingTrackId = track.id;
+    try {
+      const buffer = await this.loadBuffer(track);
+      return buffer;
+    } catch (err) {
+      console.warn('[AudioEngine] Track preloading failed for:', track.id, err);
+      return null;
+    } finally {
+      this.isPreloadingTrackId = null;
+    }
   }
 
   // Mobile Autoplay unlock
@@ -175,18 +204,20 @@ export class AudioEngine {
       source.connect(this.gainNode!);
 
       if (targetAudioContextTime > ctx.currentTime) {
-        // Scheduled in the future (e.g. 500ms ahead)
+        // Scheduled cleanly in the future (crystal-clear sub-millisecond hardware clock synchronization)
         source.start(targetAudioContextTime, playback.position);
         this.scheduledAudioStartTime = targetAudioContextTime;
         this.scheduledTrackOffset = playback.position;
       } else {
-        // Target was in the past (e.g. joined during ongoing song)
+        // Target was in the past (late joiner or network delayed packet)
         const elapsedSec = ctx.currentTime - targetAudioContextTime;
         const currentPos = playback.position + elapsedSec;
 
         if (currentPos < buffer.duration) {
-          source.start(ctx.currentTime, currentPos);
-          this.scheduledAudioStartTime = ctx.currentTime - elapsedSec;
+          // Provide 50ms lead-in for the audio hardware thread to queue without stuttering
+          const leadInSec = 0.05;
+          source.start(ctx.currentTime + leadInSec, currentPos + leadInSec);
+          this.scheduledAudioStartTime = (ctx.currentTime + leadInSec) - (currentPos + leadInSec - playback.position);
           this.scheduledTrackOffset = playback.position;
         } else {
           console.log('[AudioEngine] Track has already ended');
@@ -196,6 +227,7 @@ export class AudioEngine {
 
       this.currentSource = source;
       this.isPlaying = true;
+      this.consecutiveHighDriftCount = 0;
 
       // Start continuous drift monitoring
       this.startDriftMonitoring(roomId);
@@ -247,11 +279,12 @@ export class AudioEngine {
       }
 
       // Micro-drift correction:
-      // If drift is between 15ms and 80ms, gently nudge playbackRate by 0.5% for 300ms
+      // If drift is between 12ms and 150ms, gently nudge playbackRate proportionally
       // This eliminates echo without perceptible pitch shifts or audible clicks!
-      if (!this.isNudging && Math.abs(driftMs) >= 15 && Math.abs(driftMs) <= 80) {
+      if (!this.isNudging && Math.abs(driftMs) >= 12 && Math.abs(driftMs) <= 150) {
         this.isNudging = true;
-        const nudgeRate = driftMs > 0 ? 0.995 : 1.005; // ahead -> slow down, behind -> speed up
+        const nudgeMagnitude = Math.min(0.012, 0.004 + (Math.abs(driftMs) / 12000));
+        const nudgeRate = driftMs > 0 ? (1.0 - nudgeMagnitude) : (1.0 + nudgeMagnitude); // ahead -> slow down, behind -> speed up
         this.currentSource.playbackRate.setValueAtTime(nudgeRate, this.ctx.currentTime);
 
         setTimeout(() => {
@@ -259,11 +292,17 @@ export class AudioEngine {
             this.currentSource.playbackRate.setValueAtTime(1.0, this.ctx.currentTime);
           }
           this.isNudging = false;
-        }, 350);
-      } else if (Math.abs(driftMs) > 100) {
-        // Hard drift > 100ms: resynchronize buffer
-        console.warn(`[AudioEngine] Large drift detected (${Math.round(driftMs)}ms). Rescheduling...`);
-        this.schedulePlayback(this.currentPlaybackState, roomId);
+        }, 400);
+      } else if (Math.abs(driftMs) > 150) {
+        // Require 3 consecutive high drift readings before hard resyncing, avoiding transient network spikes
+        this.consecutiveHighDriftCount++;
+        if (this.consecutiveHighDriftCount >= 3) {
+          console.warn(`[AudioEngine] Sustained large drift detected (${Math.round(driftMs)}ms over 3 intervals). Smoothly rescheduling...`);
+          this.consecutiveHighDriftCount = 0;
+          this.schedulePlayback(this.currentPlaybackState, roomId);
+        }
+      } else {
+        this.consecutiveHighDriftCount = 0;
       }
     }, 500);
   }

@@ -41,8 +41,28 @@ export const SpeakerView: React.FC<Props> = ({ room, deviceId, onLeaveRoom }) =>
   const [isCharging, setIsCharging] = useState<boolean | null>(null);
   const [isConnected, setIsConnected] = useState(socket.connected);
 
+  const [isTrackCached, setIsTrackCached] = useState<boolean>(() => {
+    return playback.track ? audioEngine.hasBuffer(playback.track.id) : false;
+  });
+
   const thisSpeaker: SpeakerDevice | undefined = room.speakers[deviceId];
   const playback: PlaybackState = room.currentPlayback;
+
+  // Preload and decode track immediately when room track changes or when joined
+  useEffect(() => {
+    if (playback?.track) {
+      if (audioEngine.hasBuffer(playback.track.id)) {
+        setIsTrackCached(true);
+      } else {
+        setIsTrackCached(false);
+        audioEngine.preloadTrack(playback.track).then((buf) => {
+          if (buf) {
+            setIsTrackCached(true);
+          }
+        });
+      }
+    }
+  }, [playback?.track?.id, playback?.track?.url]);
 
   // Listen to Battery Status API if available
   useEffect(() => {
@@ -106,6 +126,9 @@ export const SpeakerView: React.FC<Props> = ({ room, deviceId, onLeaveRoom }) =>
     const success = await audioEngine.unlock();
     if (success) {
       setIsUnlocked(true);
+      if (playback?.track) {
+        audioEngine.preloadTrack(playback.track);
+      }
       if (playback) {
         audioEngine.schedulePlayback(playback, room.id);
       }
@@ -213,8 +236,17 @@ export const SpeakerView: React.FC<Props> = ({ room, deviceId, onLeaveRoom }) =>
             )}
           </div>
           {playback.track && (
-            <div className="text-xs text-slate-400 mt-1 font-medium line-clamp-1">
-              {playback.track.title}
+            <div className="flex flex-col items-center gap-1.5 mt-2">
+              <div className="text-xs text-slate-300 font-semibold line-clamp-1 max-w-[280px]">
+                {playback.track.title}
+              </div>
+              <span className={`text-[10px] font-bold tracking-wider px-2.5 py-0.5 rounded-full ${
+                isTrackCached
+                  ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                  : 'bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse'
+              }`}>
+                {isTrackCached ? '✓ Buffer Cached in RAM' : '⏳ Caching audio buffer...'}
+              </span>
             </div>
           )}
         </div>

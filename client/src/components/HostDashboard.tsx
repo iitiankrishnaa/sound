@@ -54,6 +54,8 @@ export const HostDashboard: React.FC<Props> = ({ room, lanUrl, onLeaveRoom }) =>
   const [editingSpeakerId, setEditingSpeakerId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [isHostAudioEnabled, setIsHostAudioEnabled] = useState(true);
   const [hostVolume, setHostVolume] = useState(1.0);
   const [hostMuted, setHostMuted] = useState(false);
@@ -109,16 +111,25 @@ export const HostDashboard: React.FC<Props> = ({ room, lanUrl, onLeaveRoom }) =>
     if (room.currentPlayback.isPlaying) {
       socket.emit('HOST_PAUSE', { roomId: room.id, position: currentPosition });
     } else {
-      socket.emit('HOST_PLAY', { roomId: room.id, position: currentPosition, targetDelayMs: 600 });
+      // Dynamic cloud-aware lead time: give all connected speakers plenty of time
+      // to schedule Web Audio API hardware timers accurately without late-join echo
+      const maxSpeakerLatency = Math.max(
+        0,
+        ...Object.values(room.speakers).map((s) => s.latencyMs || 0)
+      );
+      const targetDelayMs = Math.max(1000, Math.round(maxSpeakerLatency * 3.5));
+      socket.emit('HOST_PLAY', { roomId: room.id, position: currentPosition, targetDelayMs });
     }
   };
 
   const handleSeek = (newSec: number) => {
     setCurrentPosition(newSec);
-    socket.emit('HOST_SEEK', { roomId: room.id, position: newSec, targetDelayMs: 450 });
+    socket.emit('HOST_SEEK', { roomId: room.id, position: newSec, targetDelayMs: 800 });
   };
 
   const handleChangeTrack = (track: TrackInfo) => {
+    // Proactively preload audio buffer into Host's memory
+    audioEngine.preloadTrack(track);
     socket.emit('HOST_CHANGE_TRACK', { roomId: room.id, track });
     setCurrentPosition(0);
   };
@@ -171,22 +182,68 @@ export const HostDashboard: React.FC<Props> = ({ room, lanUrl, onLeaveRoom }) =>
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (file.size > 100 * 1024 * 1024) {
+      setUploadError('File is too large! Maximum allowed size is 100 MB.');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
     setIsUploading(true);
-    const formData = new FormData();
-    formData.append('audio', file);
+    setUploadError(null);
+    setUploadStatus('Decoding and analyzing audio in browser...');
 
     try {
+      // Decode audio in host browser to get exact duration and cache buffer in RAM
+      let durationSec = 180;
+      let decodedBuffer: AudioBuffer | null = null;
+      try {
+        const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+        const tempCtx = new AudioCtxClass();
+        const arrayBuffer = await file.arrayBuffer();
+        decodedBuffer = await tempCtx.decodeAudioData(arrayBuffer.slice(0));
+        if (decodedBuffer && decodedBuffer.duration) {
+          durationSec = Math.round(decodedBuffer.duration);
+        }
+      } catch (decodeErr) {
+        console.warn('Browser pre-decode warning:', decodeErr);
+      }
+
+      setUploadStatus('Uploading audio to room...');
+
+      const formData = new FormData();
+      formData.append('audio', file);
+      formData.append('duration', durationSec.toString());
+      formData.append('artist', 'Host Custom Audio');
+
       const res = await fetch('/api/upload-track', {
         method: 'POST',
         body: formData
       });
+
+      if (!res.ok) {
+        let errMsg = `Upload failed with status ${res.status}`;
+        try {
+          const errData = await res.json();
+          if (errData.error) errMsg = errData.error;
+        } catch {}
+        throw new Error(errMsg);
+      }
+
       const data = await res.json();
       if (data.success && data.track) {
+        // Pre-cache decoded buffer in audioEngine so host has 0ms load delay!
+        if (decodedBuffer) {
+          audioEngine.setCachedBuffer(data.track.id, decodedBuffer);
+        }
         setStudioTracks((prev) => [data.track, ...prev]);
         handleChangeTrack(data.track);
+        setUploadStatus(null);
+      } else {
+        throw new Error(data.error || 'Failed to process audio track');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('File upload error:', err);
+      setUploadError(err.message || 'File upload failed. Please try an MP3, WAV, or M4A file.');
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -553,25 +610,39 @@ export const HostDashboard: React.FC<Props> = ({ room, lanUrl, onLeaveRoom }) =>
             {/* TAB: Upload Custom Audio File */}
             {activeTab === 'upload' && (
               <div className="space-y-4">
+                {uploadError && (
+                  <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-400 font-medium flex items-center justify-between">
+                    <span>⚠️ {uploadError}</span>
+                    <button onClick={() => setUploadError(null)} className="text-rose-300 hover:text-rose-100 font-bold ml-2">×</button>
+                  </div>
+                )}
                 <div
-                  onClick={() => fileInputRef.current?.click()}
-                  className="border-2 border-dashed border-slate-700 hover:border-sky-500/50 rounded-2xl p-8 text-center cursor-pointer bg-slate-900/40 hover:bg-slate-900/80 transition"
+                  onClick={() => !isUploading && fileInputRef.current?.click()}
+                  className={`border-2 border-dashed border-slate-700 hover:border-sky-500/50 rounded-2xl p-8 text-center cursor-pointer bg-slate-900/40 hover:bg-slate-900/80 transition ${isUploading ? 'opacity-80 cursor-wait' : ''}`}
                 >
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept="audio/*"
+                    accept="audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac,.weba,.opus"
                     onChange={handleFileUpload}
                     className="hidden"
+                    disabled={isUploading}
                   />
                   <div className="w-12 h-12 rounded-2xl bg-sky-500/10 text-sky-400 flex items-center justify-center mx-auto mb-3">
                     <Upload size={24} className={isUploading ? 'animate-bounce' : ''} />
                   </div>
                   <div className="font-bold text-sm text-slate-200">
-                    {isUploading ? 'Distributing Audio to All Devices...' : 'Click to Upload Audio File (MP3, WAV, FLAC)'}
+                    {uploadStatus ? (
+                      <span className="text-sky-400 flex items-center justify-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping" />
+                        {uploadStatus}
+                      </span>
+                    ) : (
+                      'Click to Upload Audio File (MP3, WAV, M4A, FLAC)'
+                    )}
                   </div>
                   <p className="text-xs text-slate-400 mt-1">
-                    Uploaded file will be instantly decoded and played across every phone in your room.
+                    Audio is instantly decoded into memory and synchronized across every phone in your room. Max 100 MB.
                   </p>
                 </div>
               </div>

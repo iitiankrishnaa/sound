@@ -35,9 +35,16 @@ export class SyncEngine {
     this.setupListeners();
   }
 
+  private getHighResTime(): number {
+    if (typeof performance !== 'undefined' && performance.timeOrigin && performance.now) {
+      return performance.timeOrigin + performance.now();
+    }
+    return Date.now();
+  }
+
   private setupListeners() {
     socket.on('SYNC_PONG', (payload: SyncPongPayload) => {
-      const t3 = Date.now();
+      const t3 = this.getHighResTime();
       const t0 = payload.t0;
       const t1 = payload.t1;
       const t2 = payload.t2;
@@ -52,19 +59,19 @@ export class SyncEngine {
     // When returning to tab, burst re-synchronize immediately
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
-        this.burstSync(4);
+        this.burstSync(6);
       }
     });
   }
 
   public start() {
     if (this.syncIntervalId) return;
-    // Initial burst to quickly converge
-    this.burstSync(8);
-    // Ongoing maintenance ping every 3 seconds
+    // Initial burst of 10 pings to converge clock offset immediately
+    this.burstSync(10);
+    // Ongoing maintenance ping every 2.5 seconds
     this.syncIntervalId = setInterval(() => {
       this.ping();
-    }, 3000);
+    }, 2500);
   }
 
   public stop() {
@@ -76,12 +83,12 @@ export class SyncEngine {
 
   public ping() {
     if (socket.connected) {
-      const t0 = Date.now();
+      const t0 = this.getHighResTime();
       socket.emit('SYNC_PING', { t0 } as SyncPingPayload);
     }
   }
 
-  public burstSync(count = 6) {
+  public burstSync(count = 10) {
     let fired = 0;
     const interval = setInterval(() => {
       this.ping();
@@ -89,7 +96,7 @@ export class SyncEngine {
       if (fired >= count) {
         clearInterval(interval);
       }
-    }, 150);
+    }, 100);
   }
 
   private addSample(sample: SyncSample) {
@@ -98,12 +105,17 @@ export class SyncEngine {
       this.samples.shift();
     }
 
-    // Filter samples: pick the 50% with lowest RTT (least network delay jitter)
-    const sortedByRtt = [...this.samples].sort((a, b) => a.rtt - b.rtt);
-    const bestCount = Math.max(1, Math.ceil(sortedByRtt.length / 2));
+    // NTP Outlier rejection:
+    // Drop samples whose RTT is heavily inflated by bufferbloat or asymmetric queueing
+    const minRtt = Math.min(...this.samples.map(s => s.rtt));
+    const cleanSamples = this.samples.filter(s => s.rtt <= Math.max(minRtt * 1.35, minRtt + 20));
+
+    // Sort by lowest RTT and pick the best lowest-jitter samples
+    const sortedByRtt = [...cleanSamples].sort((a, b) => a.rtt - b.rtt);
+    const bestCount = Math.max(1, Math.ceil(sortedByRtt.length * 0.6));
     const bestSamples = sortedByRtt.slice(0, bestCount);
 
-    // Median offset among best samples
+    // Median offset among best samples to reject transient jitter
     const offsets = bestSamples.map(s => s.offset).sort((a, b) => a - b);
     const medianOffset = offsets[Math.floor(offsets.length / 2)];
 

@@ -70,8 +70,8 @@ export function setupSocketHandlers(io: Server, roomManager: RoomManager) {
       const room = roomManager.getRoom(data.roomId);
       if (!room || room.hostSocketId !== socket.id) return;
 
-      // Allow 500ms by default for network propagation and audio scheduling
-      const delay = data.targetDelayMs ?? 500;
+      // Allow 1000ms by default for cloud network propagation, buffer prep, and precise hardware audio scheduling
+      const delay = data.targetDelayMs ? Math.max(600, data.targetDelayMs) : 1000;
       const targetServerTime = Date.now() + delay;
 
       const updated = roomManager.updatePlayback(room.id, {
@@ -122,7 +122,7 @@ export function setupSocketHandlers(io: Server, roomManager: RoomManager) {
       const room = roomManager.getRoom(data.roomId);
       if (!room || room.hostSocketId !== socket.id) return;
 
-      const delay = data.targetDelayMs ?? 400;
+      const delay = data.targetDelayMs ? Math.max(500, data.targetDelayMs) : 800;
       const targetServerTime = Date.now() + delay;
 
       const updated = roomManager.updatePlayback(room.id, {
@@ -174,7 +174,7 @@ export function setupSocketHandlers(io: Server, roomManager: RoomManager) {
         currentPos = Math.max(0, room.currentPlayback.position + elapsedSec);
       }
 
-      const targetServerTime = now + 500;
+      const targetServerTime = now + 1000;
       const updated = roomManager.updatePlayback(room.id, {
         position: currentPos,
         targetServerTime
